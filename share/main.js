@@ -26,48 +26,25 @@ var Poltergeist,
   __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
 
 Poltergeist = (function() {
-
   function Poltergeist(port, width, height) {
-    var env, server, service, that,
-      _this = this;
+    var that;
     this.port = port;
     this.browser = new Poltergeist.Browser(this, width, height);
     this.connection = new Poltergeist.Connection(this, port);
     that = this;
     phantom.onError = function(message, stack) {
-      return that.sendError(message, stack);
+      return that.onError(message, stack);
     };
-    env = require('system').env;
-    if (env['SCREENSHOT_PORT']) {
-      server = require('webserver').create();
-      service = server.listen(env['SCREENSHOT_PORT'], function(req, res) {
-        res.statusCode = 200;
-        console.log(req.url);
-        if (req.url === '/image') {
-          res.write(_this.browser.page["native"].renderBase64('PNG'));
-        } else {
-          res.headers = {
-            'Content-Type': 'text/html'
-          };
-          res.write("<img><script>+" + (function() {
-            var xhr;
-            xhr = new XMLHttpRequest();
-            xhr.open('GET', '/image', false);
-            xhr.send();
-            return document.querySelector('img').src = "data:image/png;base64," + xhr.responseText;
-          }) + "()</script>");
-        }
-        return res.close();
-      });
-    }
     this.running = false;
   }
 
   Poltergeist.prototype.runCommand = function(command) {
+    var error;
     this.running = true;
     try {
       return this.browser[command.name].apply(this.browser, command.args);
-    } catch (error) {
+    } catch (_error) {
+      error = _error;
       if (error instanceof Poltergeist.Error) {
         return this.sendError(error);
       } else {
@@ -105,7 +82,6 @@ Poltergeist = (function() {
 window.Poltergeist = Poltergeist;
 
 Poltergeist.Error = (function() {
-
   function Error() {}
 
   return Error;
@@ -113,7 +89,6 @@ Poltergeist.Error = (function() {
 })();
 
 Poltergeist.ObsoleteNode = (function(_super) {
-
   __extends(ObsoleteNode, _super);
 
   function ObsoleteNode() {
@@ -135,7 +110,6 @@ Poltergeist.ObsoleteNode = (function(_super) {
 })(Poltergeist.Error);
 
 Poltergeist.ClickFailed = (function(_super) {
-
   __extends(ClickFailed, _super);
 
   function ClickFailed(selector, position) {
@@ -154,7 +128,6 @@ Poltergeist.ClickFailed = (function(_super) {
 })(Poltergeist.Error);
 
 Poltergeist.JavascriptError = (function(_super) {
-
   __extends(JavascriptError, _super);
 
   function JavascriptError(errors) {
@@ -172,7 +145,6 @@ Poltergeist.JavascriptError = (function(_super) {
 })(Poltergeist.Error);
 
 Poltergeist.BrowserError = (function(_super) {
-
   __extends(BrowserError, _super);
 
   function BrowserError(message, stack) {

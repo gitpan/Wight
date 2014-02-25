@@ -4,7 +4,6 @@ author:
   - 'motemen <motemen@gmail.com>'
 build_requires:
   ExtUtils::MakeMaker: 6.59
-  Test::More: 0
 configure_requires:
   ExtUtils::MakeMaker: 6.59
 distribution_type: module
@@ -34,8 +33,9 @@ requires:
   File::ShareDir: 0
   File::Spec::Functions: 0
   File::Temp: 0
+  HTML::Selector::XPath: 0
   HTTP::Cookies: 0
-  JSON::XS: 0
+  JSON: 0
   Plack::Runner: 0
   Protocol::WebSocket: 0
   Sub::Name: 0
@@ -45,5 +45,5 @@ requires:
   URI: 0
   perl: 5.8.1
 resources:
-  repository: git://github.com/motemen/Wight.git
-version: 0.01
+  repository: git://github.com/motemen/Wight
+version: 0.02

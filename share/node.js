@@ -24,10 +24,9 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 var __slice = [].slice;
 
 Poltergeist.Node = (function() {
-  var name, _fn, _i, _len, _ref,
-    _this = this;
+  var name, _fn, _i, _len, _ref;
 
-  Node.DELEGATES = ['text', 'getAttribute', 'value', 'set', 'setAttribute', 'isObsolete', 'removeAttribute', 'isMultiple', 'select', 'tagName', 'find', 'isVisible', 'position', 'trigger', 'parentId', 'clickTest', 'scrollIntoView', 'isDOMEqual'];
+  Node.DELEGATES = ['text', 'getAttribute', 'value', 'setAttribute', 'isObsolete', 'removeAttribute', 'isMultiple', 'select', 'tagName', 'find', 'isVisible', 'position', 'trigger', 'parentId', 'clickTest', 'scrollIntoView', 'isDOMEqual', 'focusAndHighlight', 'blur'];
 
   function Node(page, id) {
     this.page = page;
@@ -90,6 +89,12 @@ Poltergeist.Node = (function() {
     return this.page === other.page && this.isDOMEqual(other.id);
   };
 
+  Node.prototype.set = function(value) {
+    this.focusAndHighlight();
+    this.page.sendEvent('keypress', value.toString());
+    return this.blur();
+  };
+
   return Node;
 
-}).call(this);
+})();

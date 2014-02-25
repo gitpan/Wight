@@ -17,7 +17,9 @@ use Plack::Request;
 
 use Protocol::WebSocket::Handshake::Server;
 use Protocol::WebSocket::Frame;
-use JSON::XS;
+use JSON;
+
+use HTML::Selector::XPath ();
 
 use File::Basename qw(dirname);
 use File::Spec::Functions qw(catfile updir);
@@ -48,13 +50,13 @@ use Class::Accessor::Lite::Lazy (
     ],
 );
 
-our $VERSION = '0.01';
+our $VERSION = '0.02';
 
 our @METHODS = qw(
     execute evaluate render
     body source reset resize push_frame pop_frame
+    set_headers
 );
-# within_frame
 
 our @CARP_NOT = 'Wight::Node';
 
@@ -115,7 +117,7 @@ sub _psgi_app {
                 on_read => sub {
                     $frame->append($_[0]->rbuf);
                     while (my $message = $frame->next) {
-                        my $data = JSON::XS->new->decode($message);
+                        my $data = JSON->new->decode($message);
                         $self->debug('message in:', $data);
                         if (my $error = $data->{error}) {
                             if (ref $error eq 'HASH') {
@@ -224,34 +226,25 @@ sub run {
 
 sub reload_cookie_jar {
     my $self = shift;
-    my $file = $self->{cookies_file} or return undef;
-
-    open my $fh, '<', $file or die $!;
 
     require HTTP::Cookies;
-    my $jar = HTTP::Cookies->new;
 
-    my $domain;
-    while (<$fh>) {
-        chomp;
-        if (/^\[(.+)\]$/) {
-            $domain = $1;
-        } elsif (/^([^=]+?)=(.+)$/) {
-            my ($key, $value) = ($1, $2);
-            $value =~ s/^"(.+)"$/$1/;
-
-            next unless $domain;
-            $jar->set_cookie(
-                '0',
-                $key,
-                $value,
-                '/',
-                $domain,
-            );
-        }
+    my $cookies = $self->call('cookies');
+    my $cookie_jar = HTTP::Cookies->new;
+    foreach (@$cookies) {
+        $cookie_jar->set_cookie(
+            '0',
+            $_->{name},
+            $_->{value},
+            $_->{path},
+            $_->{domain},
+            undef, # port
+            undef, # path_spec
+            $_->{secure},
+        );
     }
 
-    return $self->{cookie_jar} = $jar;
+    return $self->{cookie_jar} = $cookie_jar;
 }
 
 *walk = \&run;
@@ -322,7 +315,7 @@ sub _on_read_cb {
         $frame->append($chunk);
 
         while (my $message = $frame->next) {
-            my $data = JSON::XS->new->decode($message);
+            my $data = JSON->new->decode($message);
             $self->debug('message in:', $data);
             if (my $error = $data->{error}) {
                 if ($self->client_cv) {
@@ -350,10 +343,8 @@ sub call {
 
     if (my $e = $@) {
         if (blessed $e && $e->isa('Wight::Exception')) {
+            $self->cleanup;
             if ($e->is_eof && $self->{exiting}) {
-                $self->{twiggy}->{exit_guard}->send;
-                undef $self->{twiggy};
-                undef $self->{ws_handshake};
                 return 1;
             } else {
                 croak $e;
@@ -362,7 +353,7 @@ sub call {
             croak $e;
         }
     }
-    croak $res->{error} unless exists $res->{response};
+    croak $res->{error} if !exists $res->{response} && defined $res->{error};
 
     return $res->{response};
 }
@@ -387,6 +378,21 @@ sub current_url {
     return URI->new($url);
 }
 
+sub within_frame {
+    my ($self, $name, $block) = @_;
+    $self->call(push_frame => $name);
+    eval { $block->() };
+    $self->call('pop_frame');
+    die if $@;
+}
+
+sub cleanup {
+    my $self = shift;
+    $self->{twiggy}->{exit_guard}->send;
+    undef $self->{twiggy};
+    undef $self->{ws_handshake};
+}
+
 sub exit {
     my $self = shift;
     local $self->{exiting} = 1;
@@ -404,7 +410,8 @@ foreach my $method (@METHODS) {
 
 sub find {
     my ($self, $selector) = @_;
-    my $result = $self->call(find => $selector);
+    my $xpath = $selector =~ m!^(?:/|id\()! ? $selector : HTML::Selector::XPath::selector_to_xpath($selector);
+    my $result = $self->call(find => $xpath);
     my $ids = $result->{ids};
     return unless $ids && @$ids;
 
@@ -539,6 +546,10 @@ Finds a node within current page and returns a (list of) L<Wight::Node>.
 =item $wight->render($file)
 
 Renders current page to local file.
+
+=item $wight->set_headers(\%headers)
+
+Set request headers.
 
 =back
 

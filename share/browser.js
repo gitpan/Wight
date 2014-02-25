@@ -24,54 +24,87 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 var __slice = [].slice;
 
 Poltergeist.Browser = (function() {
-
   function Browser(owner, width, height) {
     this.owner = owner;
     this.width = width || 1024;
     this.height = height || 768;
     this.state = 'default';
+    this.page_stack = [];
     this.page_id = 0;
     this.resetPage();
   }
 
   Browser.prototype.resetPage = function() {
-    var _this = this;
     if (this.page != null) {
       this.page.release();
+      phantom.clearCookies();
     }
-    this.page = new Poltergeist.WebPage(this.width, this.height);
-    this.page.onLoadStarted = function() {
-      if (_this.state === 'clicked') {
-        return _this.state = 'loading';
-      }
-    };
-    this.page.onNavigationRequested = function(url, navigation) {
-      if (_this.state === 'clicked' && navigation === 'FormSubmitted') {
-        return _this.state = 'loading';
-      }
-    };
-    this.page.onLoadFinished = function(status) {
-      if (_this.state === 'loading') {
-        _this.sendResponse({
-          status: status,
-          click: _this.last_click
-        });
-        return _this.state = 'default';
-      }
-    };
-    this.page.onInitialized = function() {
-      return _this.page_id += 1;
-    };
-    this.page.onConfirm = function() {
-      var args;
-      args = 1 <= arguments.length ? __slice.call(arguments, 0) : [];
-      return _this.ask('confirm', args);
-    };
-    return this.page.onPrompt = function() {
-      var args;
-      args = 1 <= arguments.length ? __slice.call(arguments, 0) : [];
-      return _this.ask('prompt', args);
-    };
+    this.page = new Poltergeist.WebPage;
+    this.page.setViewportSize({
+      width: this.width,
+      height: this.height
+    });
+    this.page.onLoadStarted = (function(_this) {
+      return function() {
+        if (_this.state === 'clicked') {
+          return _this.state = 'loading';
+        }
+      };
+    })(this);
+    this.page.onNavigationRequested = (function(_this) {
+      return function(url, navigation) {
+        if (_this.state === 'clicked' && navigation === 'FormSubmitted') {
+          return _this.state = 'loading';
+        }
+      };
+    })(this);
+    this.page.onLoadFinished = (function(_this) {
+      return function(status) {
+        if (_this.state === 'loading') {
+          _this.sendResponse({
+            status: status,
+            click: _this.last_click
+          });
+          return _this.state = 'default';
+        } else if (_this.state === 'awaiting_frame_load') {
+          _this.page.injectAgent();
+          _this.sendResponse(true);
+          return _this.state = 'default';
+        }
+      };
+    })(this);
+    this.page.onInitialized = (function(_this) {
+      return function() {
+        return _this.page_id += 1;
+      };
+    })(this);
+    this.page.onPageCreated = (function(_this) {
+      return function(sub_page) {
+        var name;
+        if (_this.state === 'awaiting_sub_page') {
+          name = _this.page_name;
+          _this.state = 'default';
+          _this.page_name = null;
+          return setTimeout((function() {
+            return _this.push_window(name);
+          }), 0);
+        }
+      };
+    })(this);
+    this.page.onConfirm = (function(_this) {
+      return function() {
+        var args;
+        args = 1 <= arguments.length ? __slice.call(arguments, 0) : [];
+        return _this.ask('confirm', args);
+      };
+    })(this);
+    return this.page.onPrompt = (function(_this) {
+      return function() {
+        var args;
+        args = 1 <= arguments.length ? __slice.call(arguments, 0) : [];
+        return _this.ask('prompt', args);
+      };
+    })(this);
   };
 
   Browser.prototype.ask = function(name, args) {
@@ -89,7 +122,7 @@ Poltergeist.Browser = (function() {
     errors = this.page.errors();
     if (errors.length > 0) {
       this.page.clearErrors();
-      throw new Poltergeist.JavascriptError(errors);
+      return this.owner.sendError(new Poltergeist.JavascriptError(errors));
     } else {
       return this.owner.sendResponse(response);
     }
@@ -103,12 +136,15 @@ Poltergeist.Browser = (function() {
     }
   };
 
-  Browser.prototype.visit = function(url, headers) {
+  Browser.prototype.visit = function(url) {
+    var prev_url;
     this.state = 'loading';
-    return this.page.open(url, {
-      operation: "get",
-      headers: headers
-    });
+    prev_url = this.page.currentUrl();
+    this.page.open(url);
+    if (/#/.test(url) && prev_url.split('#')[0] === url.split('#')[0]) {
+      this.state = 'default';
+      return this.sendResponse('success');
+    }
   };
 
   Browser.prototype.current_url = function() {
@@ -185,28 +221,81 @@ Poltergeist.Browser = (function() {
     return this.sendResponse(true);
   };
 
-  Browser.prototype.push_frame = function(id) {
-    this.page.pushFrame(id);
-    return this.sendResponse(true);
+  Browser.prototype.push_frame = function(name) {
+    if (this.page.pushFrame(name)) {
+      if (this.page.currentUrl() === 'about:blank') {
+        return this.state = 'awaiting_frame_load';
+      } else {
+        return this.sendResponse(true);
+      }
+    } else {
+      return setTimeout(((function(_this) {
+        return function() {
+          return _this.push_frame(name);
+        };
+      })(this)), 50);
+    }
   };
 
   Browser.prototype.pop_frame = function() {
-    this.page.popFrame();
+    return this.sendResponse(this.page.popFrame());
+  };
+
+  Browser.prototype.push_window = function(name) {
+    var sub_page;
+    sub_page = this.page.getPage(name);
+    if (sub_page) {
+      if (sub_page.currentUrl() === 'about:blank') {
+        return sub_page.onLoadFinished = (function(_this) {
+          return function() {
+            sub_page.onLoadFinished = null;
+            return _this.push_window(name);
+          };
+        })(this);
+      } else {
+        this.page_stack.push(this.page);
+        this.page = sub_page;
+        this.page_id += 1;
+        return this.sendResponse(true);
+      }
+    } else {
+      this.page_name = name;
+      return this.state = 'awaiting_sub_page';
+    }
+  };
+
+  Browser.prototype.pop_window = function() {
+    var prev_page;
+    prev_page = this.page_stack.pop();
+    if (prev_page) {
+      this.page = prev_page;
+    }
     return this.sendResponse(true);
   };
 
   Browser.prototype.click = function(page_id, id) {
-    var node,
-      _this = this;
+    var node;
     node = this.node(page_id, id);
     this.state = 'clicked';
     this.last_click = node.click();
-    return setTimeout(function() {
-      if (_this.state !== 'loading') {
-        _this.state = 'default';
-        return _this.sendResponse(_this.last_click);
+    return setTimeout((function(_this) {
+      return function() {
+        if (_this.state !== 'loading') {
+          _this.state = 'default';
+          return _this.sendResponse(_this.last_click);
+        }
+      };
+    })(this), 5);
+  };
+
+  Browser.prototype.click_coordinates = function(x, y) {
+    this.page.sendEvent('click', x, y);
+    return this.sendResponse({
+      click: {
+        x: x,
+        y: y
       }
-    }, 5);
+    });
   };
 
   Browser.prototype.drag = function(page_id, id, other_id) {
@@ -273,8 +362,29 @@ Poltergeist.Browser = (function() {
     return this.sendResponse(this.page.networkTraffic());
   };
 
-  Browser.prototype.page_settings = function(settings) {
-    this.page.setSettings(settings);
+  Browser.prototype.set_headers = function(headers) {
+    if (headers['User-Agent']) {
+      this.page.setUserAgent(headers['User-Agent']);
+    }
+    this.page.setCustomHeaders(headers);
+    return this.sendResponse(true);
+  };
+
+  Browser.prototype.response_headers = function() {
+    return this.sendResponse(this.page.responseHeaders());
+  };
+
+  Browser.prototype.cookies = function() {
+    return this.sendResponse(this.page.cookies());
+  };
+
+  Browser.prototype.set_cookie = function(cookie) {
+    phantom.addCookie(cookie);
+    return this.sendResponse(true);
+  };
+
+  Browser.prototype.remove_cookie = function(name) {
+    this.page.deleteCookie(name);
     return this.sendResponse(true);
   };
 

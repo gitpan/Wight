@@ -15,7 +15,10 @@ inc/Module/Install/Win32.pm
 inc/Module/Install/WriteAll.pm
 inc/Pod/Markdown.pm
 inc/Test/Builder/Module.pm
+inc/Test/Fatal.pm
+inc/Test/More.pm
 inc/Test/Requires.pm
+inc/Try/Tiny.pm
 lib/Test/Wight.pm
 lib/Wight.pm
 lib/Wight/Node.pm
@@ -36,6 +39,7 @@ t/03_restart.t
 t/04_error.t
 t/05_prompt_confirm.t
 t/06_share_env.t
+t/07_headers.t
 t/80_live.t
 xt/01_podspell.t
 xt/02_perlcritic.t

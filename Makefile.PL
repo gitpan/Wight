@@ -19,7 +19,7 @@ requires 'AnyEvent::Util';
 requires 'Twiggy';
 
 requires 'Protocol::WebSocket';
-requires 'JSON::XS';
+requires 'JSON';
 
 requires 'File::Basename';
 requires 'File::Spec::Functions';
@@ -39,10 +39,22 @@ requires 'Plack::Runner';
 requires 'HTTP::Cookies';
 requires 'File::Temp';
 
-test_requires 'Test::More';
+requires 'HTML::Selector::XPath';
+
+test_requires 'Test::More', 1;
+test_requires 'Test::Fatal';
 test_requires 'Test::Requires';
 
 requires_external_bin 'phantomjs';
+
+# Check PhantomJS version
+my $phantomjs_version = qx(phantomjs --version);
+chomp $phantomjs_version;
+unless ($phantomjs_version ge '1.7.0') {
+    print "PhantomJS >= 1.7.0 required. (got: $phantomjs_version)\n";
+    print STDERR "NA: Unable to build distribution on this platform.\n";
+    exit 0;
+}
 
 auto_set_repository;
 auto_include_deps;
@@ -57,10 +69,13 @@ if ($Module::Install::AUTHOR) {
 
     my $cwd = Cwd::cwd();
 
+    system('git submodule update --init') == 0 or die "git submodule update --init: $!";
+
     my $poltergeist = Path::Class::dir('poltergeist');
 
     chdir "$poltergeist";
-    system('rake compile') == 0 or die "rake compile: $!";
+    system('bundle install') == 0 or die "bundle install $!";
+    system('bundle exec rake compile') == 0 or die "rake compile: $!";
     chdir $cwd;
 
     my $share = Path::Class::dir('share');

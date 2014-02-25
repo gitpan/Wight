@@ -24,25 +24,23 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 var __slice = [].slice;
 
 Poltergeist.WebPage = (function() {
-  var command, delegate, _fn, _fn1, _i, _j, _len, _len1, _ref, _ref1,
-    _this = this;
+  var command, delegate, _fn, _fn1, _i, _j, _len, _len1, _ref, _ref1;
 
-  WebPage.CALLBACKS = ['onAlert', 'onConsoleMessage', 'onLoadFinished', 'onInitialized', 'onLoadStarted', 'onResourceRequested', 'onResourceReceived', 'onError', 'onNavigationRequested', 'onUrlChanged', 'onConfirm', 'onPrompt'];
+  WebPage.CALLBACKS = ['onAlert', 'onConsoleMessage', 'onLoadFinished', 'onInitialized', 'onLoadStarted', 'onResourceRequested', 'onResourceReceived', 'onError', 'onNavigationRequested', 'onUrlChanged', 'onPageCreated', 'onConfirm', 'onPrompt'];
 
   WebPage.DELEGATES = ['open', 'sendEvent', 'uploadFile', 'release', 'render'];
 
-  WebPage.COMMANDS = ['currentUrl', 'find', 'nodeCall', 'pushFrame', 'popFrame', 'documentSize'];
+  WebPage.COMMANDS = ['currentUrl', 'find', 'nodeCall', 'documentSize'];
 
-  function WebPage(width, height) {
+  function WebPage(_native) {
     var callback, _i, _len, _ref;
-    this["native"] = require('webpage').create();
+    this["native"] = _native;
+    this["native"] || (this["native"] = require('webpage').create());
     this._source = "";
     this._errors = [];
     this._networkTraffic = {};
-    this.setViewportSize({
-      width: width,
-      height: height
-    });
+    this.frames = [];
+    this.sub_pages = {};
     _ref = WebPage.CALLBACKS;
     for (_i = 0, _len = _ref.length; _i < _len; _i++) {
       callback = _ref[_i];
@@ -88,8 +86,7 @@ Poltergeist.WebPage = (function() {
     if (this["native"].evaluate(function() {
       return typeof __poltergeist;
     }) === "undefined") {
-      this["native"].injectJs("" + phantom.libraryPath + "/agent.js");
-      return this.nodes = {};
+      return this["native"].injectJs("" + phantom.libraryPath + "/agent.js");
     }
   };
 
@@ -130,6 +127,10 @@ Poltergeist.WebPage = (function() {
 
   WebPage.prototype.onResourceRequestedNative = function(request) {
     this.lastRequestId = request.id;
+    if (request.url === this.redirectURL) {
+      this.redirectURL = null;
+      this.requestId = request.id;
+    }
     return this._networkTraffic[request.id] = {
       request: request,
       responseParts: []
@@ -137,12 +138,16 @@ Poltergeist.WebPage = (function() {
   };
 
   WebPage.prototype.onResourceReceivedNative = function(response) {
-    this._networkTraffic[response.id].responseParts.push(response);
+    var _ref2;
+    if ((_ref2 = this._networkTraffic[response.id]) != null) {
+      _ref2.responseParts.push(response);
+    }
     if (this.requestId === response.id) {
       if (response.redirectURL) {
-        return this.requestId = response.id;
+        return this.redirectURL = response.redirectURL;
       } else {
-        return this._statusCode = response.status;
+        this._statusCode = response.status;
+        return this._responseHeaders = response.headers;
       }
     }
   };
@@ -152,7 +157,7 @@ Poltergeist.WebPage = (function() {
   };
 
   WebPage.prototype.content = function() {
-    return this["native"].content;
+    return this["native"].frameContent;
   };
 
   WebPage.prototype.source = function() {
@@ -171,22 +176,29 @@ Poltergeist.WebPage = (function() {
     return this._statusCode;
   };
 
+  WebPage.prototype.responseHeaders = function() {
+    var headers;
+    headers = {};
+    this._responseHeaders.forEach(function(item) {
+      return headers[item.name] = item.value;
+    });
+    return headers;
+  };
+
+  WebPage.prototype.cookies = function() {
+    return this["native"].cookies;
+  };
+
+  WebPage.prototype.deleteCookie = function(name) {
+    return this["native"].deleteCookie(name);
+  };
+
   WebPage.prototype.viewportSize = function() {
     return this["native"].viewportSize;
   };
 
   WebPage.prototype.setViewportSize = function(size) {
     return this["native"].viewportSize = size;
-  };
-
-  WebPage.prototype.setSettings = function(settings) {
-    var key, value, _results;
-    _results = [];
-    for (key in settings) {
-      value = settings[key];
-      _results.push(this["native"].settings[key] = value);
-    }
-    return _results;
   };
 
   WebPage.prototype.scrollPosition = function() {
@@ -203,6 +215,43 @@ Poltergeist.WebPage = (function() {
 
   WebPage.prototype.setClipRect = function(rect) {
     return this["native"].clipRect = rect;
+  };
+
+  WebPage.prototype.setUserAgent = function(userAgent) {
+    return this["native"].settings.userAgent = userAgent;
+  };
+
+  WebPage.prototype.setCustomHeaders = function(headers) {
+    return this["native"].customHeaders = headers;
+  };
+
+  WebPage.prototype.pushFrame = function(name) {
+    var res;
+    this.frames.push(name);
+    res = this["native"].switchToFrame(name);
+    this.injectAgent();
+    return res;
+  };
+
+  WebPage.prototype.popFrame = function() {
+    this.frames.pop();
+    if (this.frames.length === 0) {
+      return this["native"].switchToMainFrame();
+    } else {
+      return this["native"].switchToFrame(this.frames[this.frames.length - 1]);
+    }
+  };
+
+  WebPage.prototype.getPage = function(name) {
+    var page;
+    if (this.sub_pages[name]) {
+      return this.sub_pages[name];
+    } else {
+      page = this["native"].getPage(name);
+      if (page) {
+        return this.sub_pages[name] = new Poltergeist.WebPage(page);
+      }
+    }
   };
 
   WebPage.prototype.dimensions = function() {
@@ -239,8 +288,7 @@ Poltergeist.WebPage = (function() {
   };
 
   WebPage.prototype.get = function(id) {
-    var _base;
-    return (_base = this.nodes)[id] || (_base[id] = new Poltergeist.Node(this, id));
+    return new Poltergeist.Node(this, id);
   };
 
   WebPage.prototype.mouseEvent = function(name, x, y) {
@@ -300,4 +348,4 @@ Poltergeist.WebPage = (function() {
 
   return WebPage;
 
-}).call(this);
+})();
